@@ -1,0 +1,10 @@
+{
+  "name": "daily-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal daily tracker: study time, reading, gym, projects. Static frontend + one Vercel function + Upstash Redis.",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@upstash/redis": "^1.34.0"
+  }
+}
