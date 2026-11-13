@@ -109,3 +109,16 @@ textarea{width:100%;min-height:90px;border:1px solid var(--line);border-radius:1
 .err{color:var(--bad);font-size:13px;min-height:1em}
 .filebtn{display:block;text-align:center;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:9px 10px;cursor:pointer;margin-bottom:8px}
 .filebtn input{display:none}
+.wk .go{background:var(--acc);color:#fff;border:0;font-weight:600;padding:8px 18px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:13px;color:var(--mute)}
+.chips button{min-height:32px;padding:5px 10px;font-size:13px;border-radius:999px}
+.chips button.on{background:var(--acc2);border-color:var(--acc);color:var(--acc);font-weight:600}
+.ex{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}
+.ex .row .goal{text-align:right}
+.exnote{font-size:12px;color:var(--mute);margin-top:2px}
+.last{font-size:12px;color:var(--mute);background:var(--bg);border-radius:8px;padding:6px 8px;margin:8px 0 4px;font-variant-numeric:tabular-nums}
+.srow{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px;color:var(--mute)}
+.srow .n{width:18px;text-align:center;font-weight:600;color:var(--ink)}
+.srow input{width:72px;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:transparent;font-variant-numeric:tabular-nums;font-size:16px}
+.srow input::placeholder{color:var(--mute);opacity:.55}
+.addset{margin-top:8px;min-height:30px;padding:4px 10px;font-size:13px;border-style:dashed;color:var(--acc)}

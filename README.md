@@ -49,3 +49,13 @@ vercel --prod
 - **Timer:** it saves the moment you started, so you can close the app, lock your phone or switch devices, and *Stop* will still log the right time.
 - **"Focused time"** is the total of every *Time* activity. *Yes/No* items are counted as days done.
 - **Deleting an activity** hides it from the views; its old numbers stay in your backups.
+
+## Workouts
+
+The Day view has a **Workout** card. It suggests the next session in the two-week rotation
+(Week A: Legs, Push A, Pull A, Push B · Week B: Pull B, Legs, Push A/B alternating, Pull A),
+based on the last session you logged. Tap **Start** (or pick another session), then enter kg and reps
+for each set. Grey placeholders show last time's numbers. Logging a set ticks **Gym** for the day.
+
+Exercises, sets, rep ranges and the rotation live in `workouts.js`. Keep exercise ids stable
+once you've logged them, or their history won't line up.

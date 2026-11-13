@@ -56,6 +56,79 @@
   function elapsed(keys) { var tk = todayKey(); var c = keys.filter(function (k) { return k <= tk; }).length; return c || keys.length; }
   function actTotal(keys, a) { return keys.reduce(function (s, k) { var v = getV(k, a.id); return s + (a.type === 'check' ? (v ? 1 : 0) : num(v)); }, 0); }
   function longest(keys, test) { var best = 0, run = 0; keys.forEach(function (k) { if (test(k)) { run++; if (run > best) best = run; } else run = 0; }); return best; }
+  // ---------- workouts ----------
+  var P = window.WORKOUT_PLAN || { rotation: [], order: [], sessions: {} };
+  function wOf(k) { var d = S.days[k]; return d && d.w && P.sessions[d.w.s] ? d.w : null; }
+  function setDone(s) { return Array.isArray(s) && num(s[1]) > 0; }
+  function doneSets(w, exId) { return ((w && w.sets && w.sets[exId]) || []).filter(setDone); }
+  function hasSets(w) { return !!w && P.sessions[w.s].exercises.some(function (ex) { return doneSets(w, ex.id).length > 0; }); }
+  function pastKeys(k) { return Object.keys(S.days).filter(function (x) { return x < k; }).sort().reverse(); }
+  function lastLogged(k) { var ks = pastKeys(k); for (var i = 0; i < ks.length; i++) if (hasSets(wOf(ks[i]))) return ks[i]; return null; }
+  function lastOf(sess, k) { var ks = pastKeys(k); for (var i = 0; i < ks.length; i++) { var w = wOf(ks[i]); if (w && w.s === sess && hasSets(w)) return ks[i]; } return ''; }
+  function resolveSlot(slot, k) { return slot === 'push' ? (lastOf('pushA', k) <= lastOf('pushB', k) ? 'pushA' : 'pushB') : slot; }
+  function nextPos(k) { var l = lastLogged(k), w = l && wOf(l); return w && typeof w.pos === 'number' ? (w.pos + 1) % P.rotation.length : 0; }
+  function suggest(k) { var p = nextPos(k); return { pos: p, s: resolveSlot(P.rotation[p], k) }; }
+  function posFor(sess, k) {
+    var start = nextPos(k), n = P.rotation.length;
+    for (var i = 0; i < n; i++) {
+      var p = (start + i) % n, slot = P.rotation[p];
+      if (slot === sess || (slot === 'push' && /^push/.test(sess))) return p;
+    }
+    return start;
+  }
+  function slotLabel(p) { var half = P.rotation.length / 2; return 'Week ' + (p < half ? 'A' : 'B') + ' · session ' + (p % half + 1) + ' of ' + half; }
+  function lastSets(exId, k) {
+    var ks = pastKeys(k);
+    for (var i = 0; i < ks.length; i++) { var w = S.days[ks[i]].w, s = w ? doneSets(w, exId) : []; if (s.length) return { k: ks[i], sets: s }; }
+    return null;
+  }
+  function kgTxt(v) { return v === '' || v == null ? '' : String(v); }
+  function setTxt(s, bw) { var kg = kgTxt(s[0]); return (kg ? (bw ? '+' : '') + kg + '×' : (bw ? 'BW×' : '')) + s[1]; }
+  function startW(sess) { var d = day(cur); d.w = { s: sess, pos: posFor(sess, cur), sets: {}, n: {} }; d.u = Date.now(); }
+
+  function vWorkout() {
+    var w = wOf(cur), sg = suggest(cur);
+    var o = '<h2>Workout</h2><section class="card wk">';
+    if (!w) {
+      var ss = P.sessions[sg.s];
+      if (!ss) return '';
+      o += '<div class="row"><div><div class="name">Next: ' + h(ss.name) + '</div><div class="goal">' + h(slotLabel(sg.pos)) + (ss.sub ? ' · ' + h(ss.sub) : '') + '</div></div>' +
+        '<button class="go" data-act="wstart" data-s="' + sg.s + '">Start</button></div>' +
+        '<div class="chips"><span>or</span>' + P.order.filter(function (id) { return id !== sg.s; }).map(function (id) {
+          return '<button data-act="wstart" data-s="' + id + '">' + h(P.sessions[id].name) + '</button>';
+        }).join('') + '</div>';
+      return o + '</section>';
+    }
+    var sess = P.sessions[w.s], tgt = 0, dn = 0;
+    sess.exercises.forEach(function (ex) { tgt += ex.sets; dn += Math.min(ex.sets, doneSets(w, ex.id).length); });
+    o += '<div class="row"><div><div class="name">' + h(sess.name) + '</div><div class="goal">' + h(slotLabel(w.pos || 0)) + (sess.sub ? ' · ' + h(sess.sub) : '') + '</div></div><div class="val">' + dn + '<span class="goal"> / ' + tgt + ' sets</span></div></div>' +
+      '<div class="bar"><i style="width:' + (tgt ? Math.min(100, dn / tgt * 100) : 0) + '%"></i></div>';
+    o += '<div class="chips">' + P.order.map(function (id) {
+      return '<button class="' + (id === w.s ? 'on' : '') + '" data-act="wsess" data-s="' + id + '">' + h(P.sessions[id].name) + '</button>';
+    }).join('') + (hasSets(w) ? '' : '<button data-act="wsess" data-s="none">Cancel</button>') + '</div>';
+    sess.exercises.forEach(function (ex) {
+      var logged = (w.sets && w.sets[ex.id]) || [], last = lastSets(ex.id, cur);
+      var rows = Math.max(ex.sets + num(w.n && w.n[ex.id]), logged.length);
+      var reps = ex.min ? (ex.min === ex.max ? ex.min : ex.min + '–' + ex.max) : 'near failure';
+      o += '<div class="ex"><div class="row"><div class="name">' + h(ex.name) + '</div><div class="goal">' + ex.sets + ' × ' + reps + ' · ' + h(ex.rest) + '</div></div>';
+      if (ex.note) o += '<div class="exnote">' + h(ex.note) + '</div>';
+      if (last) {
+        var top = ex.max && last.sets.length >= ex.sets && last.sets.every(function (s) { return num(s[1]) >= ex.max; });
+        o += '<div class="last">Last (' + parse(last.k).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + '): ' +
+          last.sets.map(function (s) { return setTxt(s, ex.bw); }).join(' · ') +
+          '<br><span class="' + (top ? 'up' : '') + '">' + (top ? 'Top of the range on every set: add weight.' : 'Beat it: one more rep or a bit more weight.') + '</span></div>';
+      }
+      for (var i = 0; i < rows; i++) {
+        var s = logged[i] || [], ls = last && last.sets[Math.min(i, last.sets.length - 1)];
+        o += '<div class="srow"><span class="n">' + (i + 1) + '</span>' +
+          '<input type="number" min="0" step="0.5" inputmode="decimal" data-act="wset" data-ex="' + ex.id + '" data-i="' + i + '" data-f="0" value="' + h(kgTxt(s[0])) + '" placeholder="' + (ls && kgTxt(ls[0]) ? h(ls[0]) : (ex.bw ? '+0' : 'kg')) + '"><span>' + (ex.bw ? '+kg' : 'kg') + '</span>' +
+          '<input type="number" min="0" step="0.5" inputmode="decimal" data-act="wset" data-ex="' + ex.id + '" data-i="' + i + '" data-f="1" value="' + h(s[1] || '') + '" placeholder="' + (ls ? h(ls[1]) : 'reps') + '"><span>reps</span></div>';
+      }
+      o += '<button class="addset" data-act="wadd" data-ex="' + ex.id + '">+ set</button></div>';
+    });
+    return o + '<p class="muted">Grey numbers are last time. Logging a set ticks Gym for the day.</p></section>';
+  }
+
   function delta(now, before, isTime, label) {
     var d = now - before; if (!before) return '';
     var cls = d > 0 ? 'up' : d < 0 ? 'down' : '';
@@ -128,9 +201,10 @@
     });
   }
   function schedulePush() { clearTimeout(pushTimer); pushTimer = setTimeout(push, 700); }
-  function commit() {
+  function commit(quiet) {
     S.savedAt = Date.now(); editSeq++; dirty = true; saveCache();
-    render();
+    // quiet: don't rebuild the page right away, so tapping from one set field to the next keeps focus
+    if (quiet) { needRender = true; setTimeout(safeRender, 0); } else render();
     if (pass) schedulePush(); else setSync('idle');
   }
   function unlock(p) {
@@ -193,6 +267,7 @@
         o += '<button class="check ' + (on ? 'on' : '') + '" data-act="toggle" data-id="' + a.id + '"><span class="box">' + (on ? '✓' : '') + '</span><span class="name">' + h(a.name) + '</span><span class="goal">' + (on ? 'Done' : 'Not yet') + '</span></button>';
       });
     }
+    o += vWorkout();
     var note = (S.days[cur] && S.days[cur].note) || '';
     o += '<h2>Notes</h2><textarea data-act="note" placeholder="What went well? What pulled you off track?">' + h(note) + '</textarea>';
     return o;
@@ -229,6 +304,11 @@
       });
       o += '<td class="tot">' + (a.type === 'check' ? actTotal(days, a) + '/7' : fmt(actTotal(days, a))) + '</td></tr>';
     });
+    var wkN = 0;
+    o += '<tr><td>Workout</td>' + days.map(function (k) {
+      var w = wOf(k); if (!hasSets(w)) return '<td class="z">·</td>';
+      wkN++; return '<td class="hit">' + h(P.sessions[w.s].short || w.s) + '</td>';
+    }).join('') + '<td class="tot">' + wkN + '/7</td></tr>';
     o += '<tr><td>All focus</td>' + totals.map(function (t) { return '<td class="' + (t ? '' : 'z') + '">' + (t ? fmtS(t) : '·') + '</td>'; }).join('') + '<td class="tot">' + fmt(wk) + '</td></tr></table></div>';
     o += '<p class="muted">Green = daily goal hit. Tap a bar to open that day.</p>';
     o += '<h2>Current streaks</h2><div class="list">' + S.activities.map(function (a) {
@@ -396,6 +476,17 @@
         var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'tracker-backup-' + todayKey() + '.json';
         document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
         break;
+      case 'wstart': startW(b.getAttribute('data-s')); commit(); break;
+      case 'wsess':
+        var ws = b.getAttribute('data-s'), dd = day(cur);
+        if (ws === 'none') { if (!hasSets(wOf(cur))) delete dd.w; }
+        else if (!wOf(cur)) startW(ws);
+        else { dd.w.s = ws; dd.w.pos = posFor(ws, cur); }
+        dd.u = Date.now(); commit(); break;
+      case 'wadd':
+        var wa = wOf(cur), ex = b.getAttribute('data-ex');
+        if (wa) { wa.n = wa.n || {}; wa.n[ex] = num(wa.n[ex]) + 1; day(cur).u = Date.now(); commit(); }
+        break;
       case 'syncnow': if (dirty) push(); else pull(); break;
       case 'logout': pass = null; lsDel(LSP); lockErr = ''; render(); break;
     }
@@ -404,7 +495,18 @@
   app.addEventListener('change', function (e) {
     var el = e.target, A = el.getAttribute('data-act'), id = el.getAttribute('data-id'); if (!A) return;
     var a = act(id);
-    if (A === 'set') { setV(cur, id, Math.max(0, Math.round(num(el.value)))); commit(); }
+    if (A === 'wset') {
+      var w = wOf(cur); if (!w) return;
+      var exId = el.getAttribute('data-ex'), si = +el.getAttribute('data-i'), sf = +el.getAttribute('data-f');
+      w.sets = w.sets || {}; var arr = w.sets[exId] = w.sets[exId] || [];
+      while (arr.length <= si) arr.push(['', 0]);
+      var val = el.value === '' ? (sf ? 0 : '') : Math.max(0, Math.round(num(el.value) * 2) / 2);
+      arr[si][sf] = val;
+      while (arr.length && !setDone(arr[arr.length - 1]) && arr[arr.length - 1][0] === '') arr.pop();
+      if (setDone(arr[si]) && act('gym') && act('gym').type === 'check' && !getV(cur, 'gym')) setV(cur, 'gym', true);
+      day(cur).u = Date.now(); commit(true);
+    }
+    else if (A === 'set') { setV(cur, id, Math.max(0, Math.round(num(el.value)))); commit(); }
     else if (A === 'note') { var d = day(cur); d.note = el.value.trim() ? el.value : ''; d.u = Date.now(); commit(); }
     else if (A === 'rename' && a) { a.name = el.value.trim() || a.name; S.settingsAt = Date.now(); commit(); }
     else if (A === 'type' && a) {
