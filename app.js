@@ -15,8 +15,9 @@
       { id: 'leetcode', name: 'LeetCode', type: 'time', goal: 45 },
       { id: 'projects', name: 'Projects', type: 'time', goal: 60 },
       { id: 'gym', name: 'Gym', type: 'check' },
-      { id: 'shake', name: 'Protein shake', type: 'check' }
-    ] };
+      { id: 'shake', name: 'Protein shake', type: 'check' },
+      { id: 'weight', name: 'Weight', type: 'measure', unit: 'kg' }
+    ], mig: { weight: 1 } };
   }
 
   var S = lsGet(LS) || defaults();
@@ -43,6 +44,47 @@
   function clock(ms) { var s = Math.max(0, Math.floor(ms / 1000)); return [Math.floor(s / 3600), Math.floor(s % 3600 / 60), s % 60].map(function (x) { return String(x).padStart(2, '0'); }).join(':'); }
   function act(id) { for (var i = 0; i < S.activities.length; i++) if (S.activities[i].id === id) return S.activities[i]; return null; }
   function timeActs() { return S.activities.filter(function (a) { return a.type === 'time'; }); }
+  function measureActs() { return S.activities.filter(function (a) { return a.type === 'measure'; }); }
+  function r1(x) { return Math.round(x * 10) / 10; }
+  function fmtM(a, v) { return (+v).toFixed(1) + (a.unit ? ' ' + a.unit : ''); }
+  function sgn(a, d) { d = r1(d); return (d > 0 ? '+' : d < 0 ? '−' : '±') + Math.abs(d).toFixed(1) + (a.unit ? ' ' + a.unit : ''); }
+  function shortDate(k) { return parse(k).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); }
+  function series(id) { return Object.keys(S.days).filter(function (k) { return num(getV(k, id)) > 0; }).sort().map(function (k) { return [k, num(getV(k, id))]; }); }
+  function lastBefore(id, k) { var s = series(id).filter(function (p) { return p[0] < k; }); return s.length ? s[s.length - 1] : null; }
+  function avgIn(keys, id) { var v = keys.map(function (k) { return num(getV(k, id)); }).filter(function (x) { return x > 0; }); return v.length ? sum(v) / v.length : null; }
+  function trailingAvg(id, k) { var v = []; for (var i = 0; i < 7; i++) { var x = num(getV(addDays(k, -i), id)); if (x > 0) v.push(x); } return v.length ? sum(v) / v.length : null; }
+  function migrate() {
+    if (S.mig && S.mig.weight) return false;
+    if (!act('weight')) S.activities.push({ id: 'weight', name: 'Weight', type: 'measure', unit: 'kg' });
+    S.mig = S.mig || {}; S.mig.weight = 1; S.settingsAt = Date.now();
+    return true;
+  }
+  function lineChart(a, keys) {
+    var pts = []; keys.forEach(function (k, i) { var v = num(getV(k, a.id)); if (v > 0) pts.push([i, v, k]); });
+    if (!pts.length) return '<p class="muted">No ' + h(a.name.toLowerCase()) + ' logged in this period yet.</p>';
+    var tk = todayKey(), avg = [];
+    keys.forEach(function (k, i) { if (k <= tk) { var t = trailingAvg(a.id, k); if (t != null) avg.push([i, t]); } });
+    var all = pts.map(function (p) { return p[1]; }).concat(avg.map(function (p) { return p[1]; }));
+    var lo = Math.min.apply(null, all), hi = Math.max.apply(null, all), pad = Math.max(0.4, (hi - lo) * 0.15); lo -= pad; hi += pad;
+    var W = 600, H = 210, L = 44, R = 12, T = 12, B = 28, n = Math.max(keys.length - 1, 1);
+    function x(i) { return (L + (W - L - R) * i / n).toFixed(1); }
+    function y(v) { return (T + (H - T - B) * (1 - (v - lo) / (hi - lo))).toFixed(1); }
+    var s = '<svg class="lc" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + h(a.name) + ' chart">';
+    for (var g = 0; g <= 3; g++) { var gv = lo + (hi - lo) * g / 3, gy = y(gv); s += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + gy + '" y2="' + gy + '" class="grid"/><text x="' + (L - 6) + '" y="' + (+gy + 4) + '" text-anchor="end">' + gv.toFixed(1) + '</text>'; }
+    var lbl = [0, Math.floor((keys.length - 1) / 2), keys.length - 1];
+    lbl.forEach(function (i, j) { s += '<text x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="' + ['start', 'middle', 'end'][j] + '">' + parse(keys[i]).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + '</text>'; });
+    var r = keys.length > 120 ? 1.8 : 3.2;
+    pts.forEach(function (p) { s += '<circle cx="' + x(p[0]) + '" cy="' + y(p[1]) + '" r="' + r + '" class="dot"><title>' + p[2] + ': ' + fmtM(a, p[1]) + '</title></circle>'; });
+    if (avg.length > 1) s += '<path class="avg" d="' + avg.map(function (p, j) { return (j ? 'L' : 'M') + x(p[0]) + ' ' + y(p[1]); }).join(' ') + '"/>';
+    s += '</svg>';
+    var first = pts[0], last = pts[pts.length - 1];
+    var sumTxt = pts.length > 1 ? fmtM(a, first[1]) + ' → ' + fmtM(a, last[1]) + ' (' + sgn(a, last[1] - first[1]) + ') · ' + pts.length + ' entries' : pts.length + ' entry: ' + fmtM(a, first[1]);
+    return '<div class="lcw">' + s + '<div class="legend"><span>' + sumTxt + '</span><span style="flex:1"></span>dots = daily · line = 7-day avg</div></div>';
+  }
+  function measureSection(keys, title) {
+    var ms = measureActs(); if (!ms.length) return '';
+    return ms.map(function (a) { return '<h2>' + h(a.name) + ' · ' + title + '</h2>' + lineChart(a, keys); }).join('');
+  }
   function checkActs() { return S.activities.filter(function (a) { return a.type === 'check'; }); }
   function getV(k, id) { var d = S.days[k]; return d && d.v ? d.v[id] : undefined; }
   function day(k) { var d = S.days[k]; if (!d) d = S.days[k] = { v: {}, u: 0 }; if (!d.v) d.v = {}; return d; }
@@ -169,6 +211,7 @@
     if (!server) return false;
     var before = JSON.stringify(S);
     S = merge(server, S);
+    if (migrate()) { S.savedAt = Date.now(); editSeq++; dirty = true; setTimeout(schedulePush, 0); }
     saveCache();
     return JSON.stringify(S) !== before;
   }
@@ -259,6 +302,21 @@
         '<button class="tbtn ' + (run ? 'stop' : '') + '" data-act="timer" data-id="' + a.id + '">' + (run ? '■ Stop' : '▶ Timer') + '</button></div>' +
         '<label class="manual"><input type="number" min="0" inputmode="numeric" data-act="set" data-id="' + a.id + '" value="' + (v || '') + '" placeholder="0"> minutes (type an exact total)</label></section>';
     });
+    var mA = measureActs();
+    if (mA.length) {
+      o += '<h2>Body</h2>';
+      mA.forEach(function (a) {
+        var v = num(getV(cur, a.id)), has = v > 0, prev = lastBefore(a.id, cur), ta = trailingAvg(a.id, cur), info = [];
+        if (has && prev) info.push(sgn(a, v - prev[1]) + ' vs ' + shortDate(prev[0]));
+        else if (!has && prev) info.push('Last: ' + fmtM(a, prev[1]) + ' on ' + shortDate(prev[0]));
+        if (ta != null) info.push('7-day avg ' + fmtM(a, ta));
+        o += '<section class="card ' + (has ? 'done' : '') + '"><div class="row"><div class="name">' + h(a.name) + '</div><div class="val">' + (has ? fmtM(a, v) : '<span class="goal">not logged</span>') + '</div></div>' +
+          '<div class="meas"><button data-act="nudge" data-id="' + a.id + '" data-n="-0.1">−0.1</button>' +
+          '<input type="text" inputmode="decimal" autocomplete="off" data-act="setm" data-id="' + a.id + '" value="' + (has ? v.toFixed(1) : '') + '" placeholder="' + (prev ? prev[1].toFixed(1) : '0.0') + '" aria-label="' + h(a.name) + '">' +
+          '<button data-act="nudge" data-id="' + a.id + '" data-n="0.1">+0.1</button>' + (has ? '<button data-act="clearm" data-id="' + a.id + '" aria-label="Clear">✕</button>' : '') + '</div>' +
+          (info.length ? '<p class="muted" style="margin:8px 0 0">' + info.join(' · ') + '</p>' : '') + '</section>';
+      });
+    }
     var cA = checkActs();
     if (cA.length) {
       o += '<h2>Done today?</h2>';
@@ -300,9 +358,11 @@
       days.forEach(function (k) {
         var v = getV(k, a.id);
         if (a.type === 'check') o += '<td class="' + (v ? 'hit' : 'z') + '">' + (v ? '✓' : '·') + '</td>';
+        else if (a.type === 'measure') { v = num(v); o += '<td class="' + (v ? '' : 'z') + '">' + (v ? v.toFixed(1) : '·') + '</td>'; }
         else { v = num(v); o += '<td class="' + (!v ? 'z' : (onGoal(k, a) ? 'hit' : '')) + '">' + (v ? fmtS(v) : '·') + '</td>'; }
       });
-      o += '<td class="tot">' + (a.type === 'check' ? actTotal(days, a) + '/7' : fmt(actTotal(days, a))) + '</td></tr>';
+      var av = a.type === 'measure' ? avgIn(days, a.id) : null;
+      o += '<td class="tot">' + (a.type === 'check' ? actTotal(days, a) + '/7' : a.type === 'measure' ? (av ? '<small>avg</small> ' + av.toFixed(1) : '—') : fmt(actTotal(days, a))) + '</td></tr>';
     });
     var wkN = 0;
     o += '<tr><td>Workout</td>' + days.map(function (k) {
@@ -311,6 +371,8 @@
     }).join('') + '<td class="tot">' + wkN + '/7</td></tr>';
     o += '<tr><td>All focus</td>' + totals.map(function (t) { return '<td class="' + (t ? '' : 'z') + '">' + (t ? fmtS(t) : '·') + '</td>'; }).join('') + '<td class="tot">' + fmt(wk) + '</td></tr></table></div>';
     o += '<p class="muted">Green = daily goal hit. Tap a bar to open that day.</p>';
+    var d30 = []; for (var q = 29; q >= 0; q--) d30.push(addDays(days[6], -q));
+    o += measureSection(d30, 'last 30 days');
     o += '<h2>Current streaks</h2><div class="list">' + S.activities.map(function (a) {
       var s = streak(a); return '<div class="li"><b>' + h(a.name) + '</b><span>' + (s ? '<em>' + s + '</em> day' + (s > 1 ? 's' : '') : '—') + '</span></div>';
     }).join('') + '</div>';
@@ -342,10 +404,16 @@
     });
     o += '</div><div class="legend">less <i></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i> more · dots = check items done</div>';
     o += '<h2>By activity</h2><div class="list">' + S.activities.map(function (a) {
+      if (a.type === 'measure') {
+        var av = avgIn(keys, a.id), pav = avgIn(pk, a.id), ls = keys.filter(function (k) { return num(getV(k, a.id)) > 0; });
+        var ch = ls.length > 1 ? sgn(a, num(getV(ls[ls.length - 1], a.id)) - num(getV(ls[0], a.id))) + ' this month' : '';
+        return '<div class="li"><b>' + h(a.name) + '</b><span>' + (av ? '<em>' + fmtM(a, av) + '</em> avg · ' + ls.length + '/' + el + ' days' : 'not logged') + '<br>' + [ch, pav && av ? sgn(a, av - pav) + ' avg vs ' + pd.toLocaleDateString('en-GB', { month: 'short' }) : ''].filter(Boolean).join(' · ') + '</span></div>';
+      }
       var t = actTotal(keys, a), pt = actTotal(pkc, a), gd = keys.filter(function (k) { return onGoal(k, a); }).length;
       var main = a.type === 'check' ? '<em>' + t + '</em> / ' + el + ' days' : '<em>' + fmt(t) + '</em>' + (a.goal ? ' · goal hit ' + gd + 'd' : '');
       return '<div class="li"><b>' + h(a.name) + '</b><span>' + main + '<br>' + delta(t, pt, a.type === 'time', pLabel) + '</span></div>';
     }).join('') + '</div>';
+    o += measureSection(keys, d.toLocaleDateString('en-GB', { month: 'long' }));
     o += '<p class="muted">Tap any day to open it. Longest focus streak this month: ' + longest(keys, function (k) { return focus(k) > 0; }) + ' days.</p>';
     return o;
   }
@@ -378,20 +446,26 @@
     o += '<h2>Activity × month</h2><div class="wrap"><table class="tbl"><tr><th></th>' + months.map(function (_, i) { return '<th>' + mname(i).slice(0, 3) + '</th>'; }).join('') + '<th>Total</th></tr>';
     S.activities.forEach(function (a) {
       o += '<tr><td title="' + h(a.name) + '">' + h(a.name) + '</td>';
+      if (a.type === 'measure') {
+        months.forEach(function (ks) { var av = avgIn(ks, a.id); o += '<td class="' + (av ? '' : 'z') + '">' + (av ? av.toFixed(1) : '·') + '</td>'; });
+        var yav = avgIn(keys, a.id); o += '<td class="tot">' + (yav ? yav.toFixed(1) : '—') + '</td></tr>'; return;
+      }
       var all = 0;
       months.forEach(function (ks) { var t = actTotal(ks, a); all += t; o += '<td class="' + (t ? '' : 'z') + '">' + (t ? (a.type === 'check' ? t + 'd' : fmtS(t)) : '·') + '</td>'; });
       o += '<td class="tot">' + (a.type === 'check' ? all + 'd' : fmtS(all)) + '</td></tr>';
     });
-    o += '</table></div><p class="muted">“d” = days done. ' + (tot ? 'Best month: ' + mname(bm, 'long') + ' (' + fmt(mt[bm]) + ').' : '') + ' Tap a month bar to open it.</p>';
+    o += '</table></div><p class="muted">“d” = days done; number items show monthly averages. ' + (tot ? 'Best month: ' + mname(bm, 'long') + ' (' + fmt(mt[bm]) + ').' : '') + ' Tap a month bar to open it.</p>';
+    o += measureSection(keys, String(y));
     return o;
   }
 
   function vSettings() {
-    var o = '<p class="muted">Rename, reorder or add what you track. “Time” items get a timer and a daily goal; “Yes/No” items are a simple check. Deleting an item hides it but keeps its past data in backups.</p>';
+    var o = '<p class="muted">Rename, reorder or add what you track. “Time” items get a timer and a daily goal; “Yes/No” items are a simple check; “Number” items log one value a day (like weight). Deleting an item hides it but keeps its past data in backups.</p>';
     S.activities.forEach(function (a, i) {
       o += '<div class="set"><input class="nm" data-act="rename" data-id="' + a.id + '" value="' + h(a.name) + '" aria-label="Name">' +
         '<div class="mv"><button data-act="mv" data-id="' + a.id + '" data-n="-1" aria-label="Move up"' + (i === 0 ? ' disabled' : '') + '>↑</button><button data-act="mv" data-id="' + a.id + '" data-n="1" aria-label="Move down"' + (i === S.activities.length - 1 ? ' disabled' : '') + '>↓</button></div>' +
-        '<div class="opts"><select data-act="type" data-id="' + a.id + '"><option value="time"' + (a.type === 'time' ? ' selected' : '') + '>Time</option><option value="check"' + (a.type === 'check' ? ' selected' : '') + '>Yes/No</option></select>' +
+        '<div class="opts"><select data-act="type" data-id="' + a.id + '"><option value="time"' + (a.type === 'time' ? ' selected' : '') + '>Time</option><option value="check"' + (a.type === 'check' ? ' selected' : '') + '>Yes/No</option><option value="measure"' + (a.type === 'measure' ? ' selected' : '') + '>Number</option></select>' +
+        (a.type === 'measure' ? '<span>Unit</span><input type="text" data-act="unit" data-id="' + a.id + '" value="' + h(a.unit || '') + '" placeholder="kg">' : '') +
         (a.type === 'time' ? '<span>Daily goal</span><input type="number" min="0" inputmode="numeric" data-act="goal" data-id="' + a.id + '" value="' + (a.goal || '') + '" placeholder="none"><span>min</span>' : '') +
         '<span style="flex:1"></span><button class="del ' + (pendingDel === a.id ? 'sure' : '') + '" data-act="del" data-id="' + a.id + '">' + (pendingDel === a.id ? 'Tap again to delete' : 'Delete') + '</button></div></div>';
     });
@@ -451,6 +525,11 @@
       case 'gomonth': cur = key(new Date(parse(cur).getFullYear(), +b.getAttribute('data-m'), 1)); setView('month'); render(); window.scrollTo(0, 0); break;
       case 'add': setV(cur, id, Math.max(0, num(getV(cur, id)) + n)); commit(); break;
       case 'toggle': setV(cur, id, !getV(cur, id)); commit(); break;
+      case 'nudge':
+        var base = num(getV(cur, id)) || (lastBefore(id, cur) || [0, 0])[1];
+        var nv = r1(base + n); if (nv > 0) { setV(cur, id, nv); commit(); }
+        break;
+      case 'clearm': setV(cur, id, 0); commit(); break;
       case 'timer':
         if (S.timer && S.timer.id === id) stopTimer();
         else { if (S.timer) stopTimer(); S.timer = { id: id, start: Date.now(), day: cur }; S.timerAt = Date.now(); }
@@ -507,11 +586,18 @@
       day(cur).u = Date.now(); commit(true);
     }
     else if (A === 'set') { setV(cur, id, Math.max(0, Math.round(num(el.value)))); commit(); }
+    else if (A === 'setm') {
+      var s = el.value.replace(',', '.').trim(), x = parseFloat(s);
+      if (s === '') setV(cur, id, 0); else if (isFinite(x) && x > 0) setV(cur, id, r1(x)); else { render(); return; }
+      commit();
+    }
+    else if (A === 'unit' && a) { a.unit = el.value.trim().slice(0, 8); S.settingsAt = Date.now(); commit(); }
     else if (A === 'note') { var d = day(cur); d.note = el.value.trim() ? el.value : ''; d.u = Date.now(); commit(); }
     else if (A === 'rename' && a) { a.name = el.value.trim() || a.name; S.settingsAt = Date.now(); commit(); }
     else if (A === 'type' && a) {
-      a.type = el.value; if (a.type === 'check') delete a.goal; else a.goal = a.goal || 0;
-      if (S.timer && S.timer.id === id && a.type === 'check') { S.timer = null; S.timerAt = Date.now(); }
+      a.type = el.value; if (a.type !== 'time') delete a.goal; else a.goal = a.goal || 0;
+      if (a.type === 'measure' && a.unit == null) a.unit = '';
+      if (S.timer && S.timer.id === id && a.type !== 'time') { S.timer = null; S.timerAt = Date.now(); }
       S.settingsAt = Date.now(); commit();
     }
     else if (A === 'goal' && a) { a.goal = Math.max(0, Math.round(num(el.value))); S.settingsAt = Date.now(); commit(); }
